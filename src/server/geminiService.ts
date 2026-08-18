@@ -154,6 +154,7 @@ async function callOpenAiCompatibleChat(options: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature?: number;
   responseFormatJson?: boolean;
+  enableSearch?: boolean; // 顶层 enable_search 参数 (Qwen/DashScope 自带联网搜索)
 }): Promise<{ text: string }> {
   const endpoint = normalizeBaseUrl(options.baseUrl || activeAiConfig.baseUrl || "https://api.deepseek.com/v1");
   const key = options.apiKey?.trim() || activeAiConfig.apiKey?.trim() || "";
@@ -174,6 +175,10 @@ async function callOpenAiCompatibleChat(options: {
 
   if (options.responseFormatJson) {
     payload.response_format = { type: "json_object" };
+  }
+
+  if (options.enableSearch) {
+    payload.enable_search = true;
   }
 
   const controller = new AbortController();
@@ -225,6 +230,7 @@ export async function callUnifiedAiChat(options: {
   temperature?: number;
   thinkingLevel?: 'HIGH' | 'LOW' | 'MINIMAL';
   enableWebSearch?: boolean;
+  enableSearch?: boolean; // Qwen/DashScope 顶层 enable_search 参数 (自带联网搜索)
   customConfig?: {
     provider?: AiProvider;
     apiKey?: string;
@@ -252,6 +258,7 @@ export async function callUnifiedAiChat(options: {
       messages,
       temperature: options.temperature,
       responseFormatJson: options.responseMimeTypeJson,
+      enableSearch: options.enableSearch,
     });
     return { text: result.text, sourceLinks: [] };
   } else {
@@ -802,6 +809,17 @@ ${customInstruction ? `【定制审核要求】:\n${customInstruction}\n` : ''}
 }
 
 /**
+ * Detects whether the active model is a Qwen / Alibaba DashScope (百炼) model.
+ * Qwen supports native web search via the top-level `enable_search` request param,
+ * letting us skip Tavily and do one-shot real-time event harvesting.
+ */
+function isQwenModel(baseUrl?: string, model?: string): boolean {
+  const base = (baseUrl || "").toLowerCase();
+  const mdl = (model || "").toLowerCase();
+  return base.includes("maas.aliyuncs.com") || base.includes("qwen") || mdl.includes("qwen");
+}
+
+/**
  * Executes AI Multi-Region Overseas New Energy Event Research
  */
 export async function runEventResearchAndDedup(
@@ -982,6 +1000,37 @@ ${customInstruction ? `【用户定制检索强化提示词】:\n${customInstruc
               isSimulated: false,
             };
           });
+        }
+      }
+    } else if (enableWebSearch && isQwenModel(baseUrlToUse, getAiModel())) {
+      // Qwen / DashScope native web search (top-level `enable_search` param): one-shot real-time
+      // event harvesting. Qwen's built-in search replaces the Tavily+DeepSeek two-step pipeline.
+      const qwenPromptContent = `当前真实时间范围：${fromDateStr} 至 ${toDateStr} (${currentMonthYear})。
+请立即使用你的内置实时联网搜索能力，检索海外 7 大区域（中东、欧英、东南亚、北美、拉美、中亚、非洲）在此时间窗口内（${fromDateStr} ~ ${toDateStr}）最新发生的新能源重大招投标、政策法令与大额签约，覆盖板块：政策监管、招商投资、网侧与储能技术、EV车队商用车、商业模式与 PPA/VPP。
+
+【硬性要求】：
+1. 必须基于实时联网搜索获取的真实新闻提炼事件，严禁编造不存在的事件或数据。
+2. 每条事件的 sourceUrl 字段必须为联网搜索返回的真实 URL（原样抄录，严禁伪造；允许使用信源主页如官方机构域名）。
+3. 若联网未检索到足够高价值事件，请如实输出空数组 []，绝不虚构填充。
+4. 请严格输出标准 JSON 数组，每条事件包含 title, eventDate (${fromDateStr}~${toDateStr}), region, category, source, sourceUrl, summary, fullContent, keyMetrics, tags, importanceScore。`;
+
+      const qwenResult = await callUnifiedAiChat({
+        systemInstruction: systemPrompt,
+        userPrompt: qwenPromptContent,
+        responseMimeTypeJson: true,
+        temperature: 0.4,
+        enableSearch: true,
+      });
+
+      if (qwenResult.text) {
+        const parsed = extractJsonArrayFromResponse(qwenResult.text);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          rawCandidates = parsed.map((item: any) => ({
+            ...item,
+            sourceUrl: item.sourceUrl,
+            webDomain: item.webDomain || extractDomain(item.sourceUrl),
+            isSimulated: false,
+          }));
         }
       }
     } else if (enableWebSearch) {
