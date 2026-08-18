@@ -1,0 +1,8 @@
+{
+  "name": "Remix 新能源AI文章自动化生成与分发平台",
+  "description": "新能源行业多区域AI事件检索、负向去重、智能文章生成、商务部个性化分发与打卡监控一体化管线平台",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
