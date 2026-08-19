@@ -562,6 +562,54 @@ async function startServer() {
     }
   });
 
+  // === LINKEDIN LEADS PROXY (linkedin-lead-gen service @ :8100) ===
+  const LEAD_GEN_BASE = "http://127.0.0.1:8100";
+  const LEAD_GEN_AUTH =
+    "Basic " + Buffer.from("beta:VFngHhHIPe71nutiKEnnPBWq").toString("base64");
+
+  // Forward request to linkedin-lead-gen, returning its JSON verbatim.
+  // Passes through GET query string and, when method is POST, a JSON body.
+  async function proxyLeadGen(
+    req: express.Request,
+    res: express.Response,
+    path: string,
+    method: string = "GET"
+  ) {
+    try {
+      const query = req.originalUrl.includes("?")
+        ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
+        : "";
+      const upstream = await fetch(`${LEAD_GEN_BASE}${path}${query}`, {
+        method,
+        headers: {
+          Authorization: LEAD_GEN_AUTH,
+          ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(method === "POST" ? { body: JSON.stringify(req.body ?? {}) } : {}),
+      });
+      const body = await upstream.text();
+      res.status(upstream.status).set("Content-Type", "application/json").send(body);
+    } catch (err: any) {
+      res.status(502).json({
+        success: false,
+        error: `LinkedIn Leads 服务(8100)不可达: ${err.message || err}`,
+      });
+    }
+  }
+
+  app.get("/api/leads", (req, res) => proxyLeadGen(req, res, "/leads"));
+  app.get("/api/leads/:id", (req, res) =>
+    proxyLeadGen(req, res, `/leads/${encodeURIComponent(req.params.id)}`)
+  );
+  // Create an async LinkedIn search mining task; body passthrough {keywords, max_posts?, posted_limit?}.
+  app.post("/api/leads/search", (req, res) =>
+    proxyLeadGen(req, res, "/tasks/linkedin-search", "POST")
+  );
+  // Task status/detail by id.
+  app.get("/api/leads/task/:id", (req, res) =>
+    proxyLeadGen(req, res, `/tasks/${encodeURIComponent(req.params.id)}`)
+  );
+
   // Clear Database Mock / Fake Data
   app.post("/api/clear-database-data", (req, res) => {
     try {
