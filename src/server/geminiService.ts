@@ -154,6 +154,7 @@ async function callOpenAiCompatibleChat(options: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature?: number;
   responseFormatJson?: boolean;
+  enableSearch?: boolean; // 顶层 enable_search 参数 (Qwen/DashScope 自带联网搜索)
 }): Promise<{ text: string }> {
   const endpoint = normalizeBaseUrl(options.baseUrl || activeAiConfig.baseUrl || "https://api.deepseek.com/v1");
   const key = options.apiKey?.trim() || activeAiConfig.apiKey?.trim() || "";
@@ -174,6 +175,10 @@ async function callOpenAiCompatibleChat(options: {
 
   if (options.responseFormatJson) {
     payload.response_format = { type: "json_object" };
+  }
+
+  if (options.enableSearch) {
+    payload.enable_search = true;
   }
 
   const controller = new AbortController();
@@ -225,6 +230,7 @@ export async function callUnifiedAiChat(options: {
   temperature?: number;
   thinkingLevel?: 'HIGH' | 'LOW' | 'MINIMAL';
   enableWebSearch?: boolean;
+  enableSearch?: boolean; // Qwen/DashScope 顶层 enable_search 参数 (自带联网搜索)
   customConfig?: {
     provider?: AiProvider;
     apiKey?: string;
@@ -252,6 +258,7 @@ export async function callUnifiedAiChat(options: {
       messages,
       temperature: options.temperature,
       responseFormatJson: options.responseMimeTypeJson,
+      enableSearch: options.enableSearch,
     });
     return { text: result.text, sourceLinks: [] };
   } else {
@@ -802,6 +809,17 @@ ${customInstruction ? `【定制审核要求】:\n${customInstruction}\n` : ''}
 }
 
 /**
+ * Detects whether the active model is a Qwen / Alibaba DashScope (百炼) model.
+ * Qwen supports native web search via the top-level `enable_search` request param,
+ * letting us skip Tavily and do one-shot real-time event harvesting.
+ */
+function isQwenModel(baseUrl?: string, model?: string): boolean {
+  const base = (baseUrl || "").toLowerCase();
+  const mdl = (model || "").toLowerCase();
+  return base.includes("maas.aliyuncs.com") || base.includes("qwen") || mdl.includes("qwen");
+}
+
+/**
  * Executes AI Multi-Region Overseas New Energy Event Research
  */
 export async function runEventResearchAndDedup(
@@ -819,8 +837,13 @@ export async function runEventResearchAndDedup(
   searchStatus: SearchDiagnosticStatus;
 }> {
   const now = toTime ? new Date(toTime) : new Date();
-  const fromDate = fromTime ? new Date(fromTime) : new Date(now.getTime() - 7 * 86400000);
-  
+  let fromDate = fromTime ? new Date(fromTime) : new Date(now.getTime() - 7 * 86400000);
+  // Clamp: if lastCollectedAt left a sub-window, widen it back to 30 days so native-search
+  // models (Qwen enable_search) find events — their news index lags a few days, so a very
+  // tight "today" window returns empty. Dedup still blocks anything already in the library.
+  const minFrom = new Date(now.getTime() - 30 * 86400000);
+  if (fromDate.getTime() > minFrom.getTime()) fromDate = minFrom;
+
   const fromDateStr = fromDate.toISOString().split("T")[0];
   const toDateStr = now.toISOString().split("T")[0];
   const currentYear = now.getFullYear() >= 2026 ? now.getFullYear() : 2026;
@@ -982,6 +1005,46 @@ ${customInstruction ? `【用户定制检索强化提示词】:\n${customInstruc
               isSimulated: false,
             };
           });
+        }
+      }
+    } else if (enableWebSearch && isQwenModel(baseUrlToUse, getAiModel())) {
+      // Qwen / DashScope native web search (top-level `enable_search` param): one-shot real-time
+      // event harvesting. Qwen's built-in search replaces the Tavily+DeepSeek two-step pipeline.
+      const qwenPromptContent = `请立即使用你的内置实时联网搜索能力，检索近期（${fromDateStr} 至 ${toDateStr} 前后，允许近 30 天内）海外 7 大区域（中东、欧英、东南亚、北美、拉美、中亚、非洲）最新发生的新能源重大招投标、政策法令与大额签约。
+
+【硬性要求】：
+1. 必须基于实时联网搜索获取的真实新闻提炼事件，严禁编造不存在的事件或数据。
+2. 每条事件的 sourceUrl 字段必须为联网搜索返回的真实 URL（原样抄录，严禁伪造；允许使用信源主页如官方机构域名）。
+3. 若联网未检索到足够高价值事件，请如实输出空数组 []，绝不虚构填充。
+4. 请严格输出标准 JSON 数组，每条事件包含 title, eventDate, region, category, source, sourceUrl, summary, keyMetrics, importanceScore。
+5. 【性能要求】请控制在 3 条以内；summary 不超过 80 字，确保快速完成输出（避免超时）。`;
+
+      const qwenSystemPrompt = `你是新能源（光伏、储能 BESS、智能电网、绿氢、商用车及车队电动化）首席行业情报分析师。执行"海外 7 大区域实时增量事件调研与负向去重"。
+【7 大区域】：中东/欧英/东南亚/北美/拉美/中亚/非洲。
+【负向去重】：严禁重复以下已记录历史事件。
+${negativePromptList.length > 0 ? negativePromptList.map((item, idx) => `${idx + 1}. ${item}`).join('\n') : "（负向缓存库为空，直接输出最新高价值事件）"}
+【输出要求】：含量化数字（GW/MWh/金额）；信源为当地官方机构或权威行业信源；仅海外市场与中国出海事件，排除中国本土内循环。
+【输出格式】：纯 JSON 数组，每条含 title, eventDate, region, category, source, sourceUrl, summary, keyMetrics, importanceScore。`;
+
+      const qwenResult = await callUnifiedAiChat({
+        systemInstruction: qwenSystemPrompt,
+        userPrompt: qwenPromptContent,
+        // NOTE: do NOT set responseMimeTypeJson for Qwen — `enable_search` + `response_format:
+        // json_object` together trigger 403 / extreme slowness on DashScope. Prompt-driven JSON
+        // (the prompt explicitly demands a JSON array) is parsed by extractJsonArrayFromResponse.
+        temperature: 0.4,
+        enableSearch: true,
+      });
+
+      if (qwenResult.text) {
+        const parsed = extractJsonArrayFromResponse(qwenResult.text);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          rawCandidates = parsed.map((item: any) => ({
+            ...item,
+            sourceUrl: item.sourceUrl,
+            webDomain: item.webDomain || extractDomain(item.sourceUrl),
+            isSimulated: false,
+          }));
         }
       }
     } else if (enableWebSearch) {
