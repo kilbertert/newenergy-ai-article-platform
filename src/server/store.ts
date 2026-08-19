@@ -214,6 +214,8 @@ export class DataStore {
       }
     ];
 
+    this.persistToDisk();
+
     return {
       success: true,
       message: "数据库中的示例假数据文章、事件、商务人员及分发任务已全部清空！",

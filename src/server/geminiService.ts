@@ -555,6 +555,14 @@ function extractJsonArrayFromResponse(text: string): any[] {
   try {
     const parsed = JSON.parse(clean);
     if (Array.isArray(parsed)) return parsed;
+    // Some OpenAI-compatible endpoints (Alibaba DashScope json_object mode) wrap the array in
+    // an object, e.g. {"events": [...]} or {"data": [...]} — unwrap the first array value.
+    if (parsed && typeof parsed === "object") {
+      for (const v of Object.values(parsed)) {
+        if (Array.isArray(v) && v.length > 0) return v;
+      }
+      return [];
+    }
   } catch {}
 
   // Match ```json ... ``` or ``` ... ```
@@ -700,7 +708,7 @@ export async function auditAndEnrichResearchEvents(
 【时间基准与时效性铁律】：
 - 本次采集的时间基准窗口：${fromDateStr} 至 ${toDateStr} (${currentYear} 年)。
 - 严禁任何 2024 年及更早的陈旧过期信息！每项事件的 eventDate 必须处于 ${fromDateStr} 至 ${toDateStr} 之间（如 ${toDateStr}）。
-- 严禁空洞公关通稿，必须扩充具备深度工程与商业价值的四段式专业解读（宏观背景、核心量化指标与技术拓扑、商业收益模型与电网合规、中国企业出海实操指引）。
+- 严禁空洞公关通稿，保持精炼（summary 60-80 字、fullContent 150-200 字），聚焦核心量化指标与技术/商业要点。
 
 【纯自然文本输出铁律 (NO MARKDOWN ASTERISKS OR HASHES)】：
 - 严格禁止在标题、摘要、fullContent 中使用 Markdown 粗体（**星号**）、井号（# 标题）或破折号（-）标记符号！
@@ -715,8 +723,8 @@ ${customInstruction ? `【定制审核要求】:\n${customInstruction}\n` : ''}
     "region": "NorthAmerica" | "EuropeUK" | "SoutheastAsia" | "MiddleEast" | "CentralAsia" | "Africa" | "LatinAmerica",
     "category": "Policy" | "Investment" | "GridTech" | "EVFleet" | "BusinessModel",
     "source": "官方权威信源全称",
-    "summary": "180-220字高密度摘要，交代时间、核心条款与数据",
-    "fullContent": "段落一【宏观背景与政策立项动因】...\\n\\n段落二【核心量化指标与技术拓扑参数】...\\n\\n段落三【商业收益模型与电网合规条款】...\\n\\n段落四【中国新能源出海企业实操与选型指引】...",
+    "summary": "60-80字精简摘要，交代时间、核心数据",
+    "fullContent": "150-200字简要技术/商业解读，不展开四段式",
     "keyMetrics": ["招投标容量 400MW/1.6GWh", "IKTVA 本地化 30%", "20年美元PPA"],
     "tags": ["构网型大储", "海外大标", "2026招标"],
     "eventDate": "${toDateStr}",
@@ -816,7 +824,10 @@ ${customInstruction ? `【定制审核要求】:\n${customInstruction}\n` : ''}
 function isQwenModel(baseUrl?: string, model?: string): boolean {
   const base = (baseUrl || "").toLowerCase();
   const mdl = (model || "").toLowerCase();
-  return base.includes("maas.aliyuncs.com") || base.includes("qwen") || mdl.includes("qwen");
+  // Only the actual Qwen family uses the native enable_search path. A DeepSeek model hosted on
+  // the Alibaba maas endpoint (base contains maas.aliyuncs.com) must NOT use enable_search —
+  // it gets strict-prompt empty results; it should go through Tavily synthesis instead.
+  return mdl.includes("qwen");
 }
 
 /**
@@ -942,6 +953,15 @@ ${customInstruction ? `【用户定制检索强化提示词】:\n${customInstruc
 ]`;
 
   let rawCandidates: any[] = [];
+  // Compact shared system prompt for synthesis (used by the Qwen enable_search branch, the
+  // Tavily branch, and the web-search-disabled branch). The full 30k-char systemPrompt made
+  // Ark-hosted DeepSeek V4 time out (>300s) on synthesis, so all branches use this compact one.
+  const qwenSystemPrompt = `你是新能源（光伏、储能 BESS、智能电网、绿氢、商用车及车队电动化）首席行业情报分析师。执行"海外 7 大区域实时增量事件调研与负向去重"。
+【7 大区域】：中东/欧英/东南亚/北美/拉美/中亚/非洲。
+【负向去重】：严禁重复以下已记录历史事件。
+${negativePromptList.length > 0 ? negativePromptList.map((item, idx) => `${idx + 1}. ${item}`).join('\n') : "（负向缓存库为空，直接输出最新高价值事件）"}
+【输出要求】：含量化数字（GW/MWh/金额）；信源为当地官方机构或权威行业信源；仅海外市场与中国出海事件，排除中国本土内循环。
+【输出格式】：纯 JSON 数组，每条含 title, eventDate, region, category, source, sourceUrl, summary, keyMetrics, importanceScore。`;
   const dedupLogs: NegativeCacheItem[] = [];
   let groundingMetadata: any = null;
   let errorType: SearchDiagnosticStatus['errorType'] = undefined;
@@ -1018,13 +1038,6 @@ ${customInstruction ? `【用户定制检索强化提示词】:\n${customInstruc
 3. 若联网未检索到足够高价值事件，请如实输出空数组 []，绝不虚构填充。
 4. 请严格输出标准 JSON 数组，每条事件包含 title, eventDate, region, category, source, sourceUrl, summary, keyMetrics, importanceScore。
 5. 【性能要求】请控制在 3 条以内；summary 不超过 80 字，确保快速完成输出（避免超时）。`;
-
-      const qwenSystemPrompt = `你是新能源（光伏、储能 BESS、智能电网、绿氢、商用车及车队电动化）首席行业情报分析师。执行"海外 7 大区域实时增量事件调研与负向去重"。
-【7 大区域】：中东/欧英/东南亚/北美/拉美/中亚/非洲。
-【负向去重】：严禁重复以下已记录历史事件。
-${negativePromptList.length > 0 ? negativePromptList.map((item, idx) => `${idx + 1}. ${item}`).join('\n') : "（负向缓存库为空，直接输出最新高价值事件）"}
-【输出要求】：含量化数字（GW/MWh/金额）；信源为当地官方机构或权威行业信源；仅海外市场与中国出海事件，排除中国本土内循环。
-【输出格式】：纯 JSON 数组，每条含 title, eventDate, region, category, source, sourceUrl, summary, keyMetrics, importanceScore。`;
 
       const qwenResult = await callUnifiedAiChat({
         systemInstruction: qwenSystemPrompt,
@@ -1109,7 +1122,9 @@ ${searchEvidenceText}
 4. 请严格输出标准 JSON 数组，每条事件包含 title, eventDate (${fromDateStr}~${toDateStr}), region, category, source, sourceUrl, summary, fullContent, keyMetrics, tags, importanceScore。`;
 
       const aiResult = await callUnifiedAiChat({
-        systemInstruction: systemPrompt,
+        // Use the shared compact system prompt (same as the Qwen branch). The full 30k-char
+        // systemPrompt made Ark-hosted DeepSeek V4 time out (>300s) on synthesis.
+        systemInstruction: qwenSystemPrompt,
         userPrompt: promptContent,
         responseMimeTypeJson: true,
         temperature: 0.4,
@@ -1133,7 +1148,9 @@ ${searchEvidenceText}
 请严格输出标准 JSON 数组，每条事件包含 title, eventDate (${fromDateStr}~${toDateStr}), region, category, source, summary, fullContent, keyMetrics, tags, importanceScore。`;
 
       const aiResult = await callUnifiedAiChat({
-        systemInstruction: systemPrompt,
+        // Use the shared compact system prompt (same as the Qwen branch). The full 30k-char
+        // systemPrompt made Ark-hosted DeepSeek V4 time out (>300s) on synthesis.
+        systemInstruction: qwenSystemPrompt,
         userPrompt: promptContent,
         responseMimeTypeJson: true,
         temperature: 0.4,
