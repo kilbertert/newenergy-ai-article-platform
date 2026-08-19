@@ -562,8 +562,10 @@ async function startServer() {
     }
   });
 
-  // === LINKEDIN LEADS PROXY (linkedin-lead-gen service @ :8100) ===
-  const LEAD_GEN_BASE = "http://127.0.0.1:8100";
+  // === LINKEDIN LEADS PROXY (linkedin-lead-gen service) ===
+  // LEAD_GEN_BASE_URL overridable via env for cross-server deployment (e.g. a tunnel
+  // back to the dev server's 8100); defaults to localhost for single-box setups.
+  const LEAD_GEN_BASE = process.env.LEAD_GEN_BASE_URL || "http://127.0.0.1:8100";
   const LEAD_GEN_AUTH =
     "Basic " + Buffer.from("beta:VFngHhHIPe71nutiKEnnPBWq").toString("base64");
 
