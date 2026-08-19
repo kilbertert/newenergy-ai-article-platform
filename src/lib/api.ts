@@ -347,6 +347,93 @@ export async function testAiConfigApi(params?: {
   return res.json();
 }
 
+// === LINKEDIN LEADS (proxied via server to linkedin-lead-gen @ :8100) ===
+export interface Lead {
+  id: number;
+  name: string;
+  company?: string | null;
+  position?: string | null;
+  linkedin_url?: string | null;
+  email?: string | null;
+  source?: string | null;
+  score?: number | null;
+  reason?: string | null;
+  company_size?: string | null;
+  post_url?: string | null;
+  confidence?: number | null;
+  task_id?: number | null;
+  status?: string | null;
+  user_sentiment?: string | null;
+  prompt_version?: string | null;
+  created_at?: string | null;
+}
+
+export interface LeadListResponse {
+  success: boolean;
+  data: Lead[];
+  error?: string | null;
+  meta?: { total: number; page: number; limit: number; pages: number } | null;
+}
+
+export interface LeadDetailResponse {
+  success: boolean;
+  data: Lead | null;
+  error?: string | null;
+  meta?: null;
+}
+
+export async function fetchLeadsApi(params?: Record<string, string>): Promise<LeadListResponse> {
+  const qs = params ? `?${new URLSearchParams(params).toString()}` : "";
+  const res = await fetch(`/api/leads${qs}`);
+  if (!res.ok) throw new Error("Failed to fetch leads");
+  return res.json();
+}
+
+export async function fetchLeadDetailApi(id: number | string): Promise<LeadDetailResponse> {
+  const res = await fetch(`/api/leads/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch lead detail");
+  return res.json();
+}
+
+// === LINKEDIN LEAD MINING TASKS (proxied via server to linkedin-lead-gen @ :8100) ===
+export interface LeadSearchTask {
+  id: number;
+  type: string;
+  status: string;
+  params?: { keywords?: string[]; max_posts?: number; posted_limit?: string };
+  error?: string | null;
+  leads_count?: number;
+  created_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface LeadTaskResponse {
+  success: boolean;
+  data: LeadSearchTask | null;
+  error?: string | null;
+  meta?: null;
+}
+
+export async function createLeadSearchTaskApi(body: {
+  keywords: string[];
+  max_posts?: number;
+  posted_limit?: string;
+}): Promise<LeadTaskResponse> {
+  const res = await fetch("/api/leads/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to start lead mining task");
+  return res.json();
+}
+
+export async function fetchLeadTaskApi(id: number | string): Promise<LeadTaskResponse> {
+  const res = await fetch(`/api/leads/task/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch lead mining task");
+  return res.json();
+}
+
 // Clear Database Mock / Fake Data
 export async function clearDatabaseDataApi(): Promise<{
   success: boolean;

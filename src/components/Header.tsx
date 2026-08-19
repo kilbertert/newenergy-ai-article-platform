@@ -11,6 +11,7 @@ import {
   Calendar,
   Settings2,
   Power,
+  UserRoundSearch,
   X,
   Check,
   RotateCcw,
@@ -60,6 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: "generator", label: "AI 文章生成引擎", icon: Play },
     { id: "article_library", label: "AI 生成文章库与时间窗", icon: Library },
     { id: "bd_portal", label: "商务分发与打卡中心", icon: CheckCircle2 },
+    { id: "leads", label: "LinkedIn 销售线索", icon: UserRoundSearch },
   ];
 
   const handleOpenScheduleModal = () => {

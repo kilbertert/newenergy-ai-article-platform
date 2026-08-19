@@ -12,6 +12,7 @@ import { AIGeneratorView } from "./components/AIGeneratorView";
 import { ArticleLibraryView } from "./components/ArticleLibraryView";
 import { BDPortalView } from "./components/BDPortalView";
 import { BDDashboardView } from "./components/BDDashboardView";
+import { LeadsView } from "./components/LeadsView";
 import { ArticleDetailModal } from "./components/ArticleDetailModal";
 import { NewMaterialModal } from "./components/NewMaterialModal";
 import {
@@ -521,6 +522,9 @@ export default function App() {
             }}
           />
         )}
+
+        {/* Module 5-B: LinkedIn Sales Leads (linkedin-lead-gen) */}
+        {activeTab === "leads" && <LeadsView onNotify={showNotification} />}
 
         {/* Module 4: BD Team Portal & Check-In Action */}
         {activeTab === "bd_portal" && (
