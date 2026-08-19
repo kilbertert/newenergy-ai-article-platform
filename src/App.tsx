@@ -106,8 +106,19 @@ export default function App() {
     setIsProcessing(true);
     try {
       const res = await triggerCollectorApi(config);
+      const added = res?.data?.addedMaterialsCount ?? 0;
+      const deduped = res?.data?.dedupedCount ?? 0;
+      const collected = res?.data?.newMaterials ?? [];
+      // Refresh data first, then land the user on the collector tab so they immediately
+      // see the freshly harvested events (previously they had to manually refresh).
       await loadData();
-      showNotification("success", res.message || "2026 最新事件搜采与负向去重完成");
+      setActiveTab("collector");
+      showNotification(
+        added > 0 ? "success" : "info",
+        added > 0
+          ? `搜采完成：新增 ${added} 项海外事件（已去重 ${deduped} 项旧闻），已自动跳转到素材列表。`
+          : `搜采完成：本次未产生新入库素材（去重 ${deduped} 项）。${res?.data?.searchStatus?.errorMessage ? " " + res.data.searchStatus.errorMessage : ""}`
+      );
     } catch (err: any) {
       showNotification("error", err.message || "搜采失败");
     } finally {
