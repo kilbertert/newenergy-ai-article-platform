@@ -16,6 +16,9 @@ WorkingDirectory=/opt/newenergy-ai-article-platform
 EnvironmentFile=/etc/newenergy-ai-article-platform/env
 # 监听端口；与 ops/deploy.sh 的 PORT 保持一致，改动要两处一起改。
 Environment=PORT=18580
+# service host 没有 IPv6 出口（只有 link-local），而 Node 的 fetch 默认优先 AAAA
+# 且不做回落，导致出站 HTTPS（leadgen、Tavily）在 connect 阶段超时。
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
 ExecStart=/usr/local/bin/node dist/server.cjs
 Restart=on-failure
 RestartSec=3
