@@ -624,14 +624,20 @@ export class DataStore {
     const art = this.articles.find(a => a.id === articleId);
     if (!art) return null;
 
-    art.status = 'distributed';
-
     let bdIdsToAssign = art.assignedBdIds && art.assignedBdIds.length > 0 ? art.assignedBdIds : [];
     if (bdIdsToAssign.length === 0) {
       // Strict region match only; no fallback to arbitrary active BD.
       const matchingBDs = this.bdMembers.filter(bd => bd.active && bd.assignedRegions.includes(art.region));
       bdIdsToAssign = matchingBDs.map(b => b.id);
       art.assignedBdIds = bdIdsToAssign;
+    }
+
+    // If no active BD covers this article, keep it pending_dispatch so it stays visible
+    // in the article library and can be dispatched once a BD for its region is added.
+    // (Previously status flipped to 'distributed' unconditionally, silently leaving the
+    // article "distributed" with zero tasks → it vanished from the pending queue.)
+    if (bdIdsToAssign.length > 0) {
+      art.status = 'distributed';
     }
 
     const targetBDs = this.bdMembers.filter(b => bdIdsToAssign.includes(b.id));
@@ -641,9 +647,14 @@ export class DataStore {
       const exists = this.distributionTasks.some(t => t.articleId === art.id && t.bdId === bd.id);
       if (!exists) {
         const lang = art.targetLanguage || bd.preferredLanguage || 'en';
-        
+
         // Execute Layer-2 AI Personalization Rendering for this BD!
         const { fullPersonalizedMarkdown, personalizedSection, isAiPersonalized } = await renderPersonalizedPostForBD(art, bd, lang);
+
+        // Re-check after the async render: concurrent distributes can both pass the first
+        // check, then both insert → duplicate tasks. Second check closes that race.
+        const existsAfter = this.distributionTasks.some(t => t.articleId === art.id && t.bdId === bd.id);
+        if (existsAfter) continue;
 
         const task: BDDistributionTask = {
           id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -794,30 +805,34 @@ export class DataStore {
       const lang = art.targetLanguage || 'en';
 
       for (const bd of bdsToAssign) {
-        // Check if task already exists
-        const exists = this.distributionTasks.some(t => t.articleId === art.id && t.bdId === bd.id);
-        if (!exists) {
-          const { fullPersonalizedMarkdown, personalizedSection, isAiPersonalized } = await renderPersonalizedPostForBD(art, bd, lang);
+        // First check before the (slow) AI personalization render...
+        const existsBefore = this.distributionTasks.some(t => t.articleId === art.id && t.bdId === bd.id);
+        if (existsBefore) continue;
+        const { fullPersonalizedMarkdown, personalizedSection, isAiPersonalized } = await renderPersonalizedPostForBD(art, bd, lang);
 
-          const task: BDDistributionTask = {
-            id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            articleId: art.id,
-            articleTitle: art.title,
-            articleRegion: art.region,
-            bdId: bd.id,
-            bdName: bd.name,
-            bdTitle: bd.title,
-            personalizedSection,
-            fullPersonalizedMarkdown,
-            personalStylePromptUsed: bd.personalStylePrompt || "标准出海商务对接人设",
-            isAiPersonalized,
-            status: "pending",
-            receivedAt: new Date().toISOString(),
-          };
+        // ...and re-check after the await: two concurrent distributes can both pass the
+        // first check while the render is in flight, then both insert → duplicate tasks.
+        const existsAfter = this.distributionTasks.some(t => t.articleId === art.id && t.bdId === bd.id);
+        if (existsAfter) continue;
 
-          this.distributionTasks.unshift(task);
-          newTasksCount++;
-        }
+        const task: BDDistributionTask = {
+          id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          articleId: art.id,
+          articleTitle: art.title,
+          articleRegion: art.region,
+          bdId: bd.id,
+          bdName: bd.name,
+          bdTitle: bd.title,
+          personalizedSection,
+          fullPersonalizedMarkdown,
+          personalStylePromptUsed: bd.personalStylePrompt || "标准出海商务对接人设",
+          isAiPersonalized,
+          status: "pending",
+          receivedAt: new Date().toISOString(),
+        };
+
+        this.distributionTasks.unshift(task);
+        newTasksCount++;
       }
 
       art.status = "distributed";

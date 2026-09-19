@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Users,
   CheckCircle2,
@@ -201,9 +201,18 @@ export const BDPortalView: React.FC<BDPortalViewProps> = ({
   const [isEditingBD, setIsEditingBD] = useState<boolean>(false);
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
   const [portalLang, setPortalLang] = useState<TargetLanguage>("zh");
+  // Check-in task status filter: all / pending check-in / completed check-in
+  const [taskStatusFilter, setTaskStatusFilter] = useState<"all" | "pending" | "published">("all");
 
   const activeBD = safeBdMembers.find((b) => b.id === selectedBDId) || safeBdMembers[0];
   const [editForm, setEditForm] = useState<Partial<BDMember>>(activeBD || {});
+
+  // Keep the edit draft in sync when the active BD changes or its profile is
+  // refreshed from the backend (after a save + loadData), so the form never
+  // shows stale data.
+  useEffect(() => {
+    setEditForm(activeBD || {});
+  }, [activeBD]);
 
   // Add BD Modal State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -236,8 +245,12 @@ export const BDPortalView: React.FC<BDPortalViewProps> = ({
 
   const t = bdUiTranslations[portalLang] || bdUiTranslations["en"];
 
-  // BD Tasks filter
-  const myTasks = safeTasks.filter((t) => t.bdId === (activeBD?.id || ""));
+  // BD Tasks filter (by active BD + optional status filter)
+  const myTasksAll = safeTasks.filter((t) => t.bdId === (activeBD?.id || ""));
+  const myTasks =
+    taskStatusFilter === "all"
+      ? myTasksAll
+      : myTasksAll.filter((t) => (taskStatusFilter === "published" ? t.status === "published" : t.status !== "published"));
 
   const handleSelectBD = (id: string) => {
     setSelectedBDId(id);
@@ -249,9 +262,12 @@ export const BDPortalView: React.FC<BDPortalViewProps> = ({
   const handleSaveBDForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeBD) return;
+    // Spread the draft first, then pin id to the currently selected BD's real id.
+    // (editForm is initialized from activeBD and carries an id field; putting it last
+    // guarantees the correct BD is updated even if editForm holds a stale id.)
     onUpdateBDProfile({
-      id: activeBD.id,
       ...editForm,
+      id: activeBD.id,
     });
     setIsEditingBD(false);
   };
@@ -776,11 +792,33 @@ export const BDPortalView: React.FC<BDPortalViewProps> = ({
                   【{activeBD?.name}】{t.myTasks}
                 </h3>
               </div>
-              <span className="text-xs text-slate-400 font-mono">共 {myTasks.length} 项任务</span>
+              <span className="text-xs text-slate-400 font-mono">共 {myTasksAll.length} 项任务</span>
+            </div>
+
+            {/* Task Status Filter */}
+            <div className="flex items-center gap-1.5 pb-1">
+              {([
+                { key: "all", label: "全部" },
+                { key: "pending", label: "待打卡" },
+                { key: "published", label: "已打卡" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setTaskStatusFilter(opt.key)}
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition border ${
+                    taskStatusFilter === opt.key
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
             {/* Task Cards List */}
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[520px] overflow-y-auto pr-1">
               {myTasks.map((task) => {
                 const isPublished = task.status === "published";
 
@@ -905,7 +943,15 @@ export const BDPortalView: React.FC<BDPortalViewProps> = ({
               {myTasks.length === 0 && (
                 <div className="p-12 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
                   <Clock className="w-8 h-8 text-slate-300 mx-auto" />
-                  <p className="text-sm font-bold text-slate-700">当前商务人员暂无待打卡任务</p>
+                  <p className="text-sm font-bold text-slate-700">
+                    {taskStatusFilter === "published"
+                      ? "当前筛选下暂无已打卡任务"
+                      : taskStatusFilter === "pending"
+                      ? "当前筛选下暂无待打卡任务"
+                      : myTasksAll.length === 0
+                      ? "当前商务人员暂无任务"
+                      : "当前筛选下暂无任务"}
+                  </p>
                   <p className="text-xs text-slate-400">
                     可在“AI 文章生成引擎”中生成个性化文章，或等待周度管线自动分发。
                   </p>

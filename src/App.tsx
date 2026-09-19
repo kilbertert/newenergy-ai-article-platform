@@ -84,7 +84,17 @@ export default function App() {
     try {
       // Step A: Trigger Collector & Negative Dedup
       const colRes = await triggerCollectorApi();
-      showNotification("info", `[1/3] 事件搜采完成：获得 ${colRes.data.addedMaterialsCount} 项海外增量事件，去重 ${colRes.data.dedupedCount} 项旧闻`);
+      const addedCount = colRes.data?.addedMaterialsCount ?? 0;
+      const dedupedCount = colRes.data?.dedupedCount ?? 0;
+
+      // If no new materials were harvested, skip generation & distribution entirely.
+      if (addedCount === 0) {
+        await loadData();
+        showNotification("info", `[1/3] 事件搜采完成：本次未采集到新事件（去重 ${dedupedCount} 项旧闻），跳过生成/分发`);
+        return;
+      }
+
+      showNotification("info", `[1/3] 事件搜采完成：获得 ${addedCount} 项海外增量事件，去重 ${dedupedCount} 项旧闻`);
 
       // Step B: Trigger AI Article Generator
       const genRes = await generateArticlesApi(3);
@@ -182,6 +192,9 @@ export default function App() {
     try {
       const res = await generateArticlesApi(count, selectedMaterialIds, stylePreset, targetLanguage, assignedBdIds, skipQuarantine);
       await loadData();
+      // Land the user on the article library so they immediately see the freshly
+      // generated (or quarantined) articles instead of having to switch tabs.
+      setActiveTab("article_library");
       if (skipQuarantine) {
         showNotification("success", `🚀 手动选择生成：已绕过隔离时间窗，文章直接分发至 ${assignedBdIds?.length || "指定"} 位商务的任务列表中！`);
       } else {

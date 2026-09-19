@@ -38,6 +38,7 @@ import {
   TARGET_LANGUAGE_NAMES,
 } from "../types";
 import { REGION_NAMES, CATEGORY_NAMES } from "../server/geminiService";
+import { formatKeyMetricsArr } from "../lib/formatKeyMetrics";
 
 interface AIGeneratorViewProps {
   materials: Material[];
@@ -462,9 +463,9 @@ export const AIGeneratorView: React.FC<AIGeneratorViewProps> = ({
                     {mat.summary}
                   </p>
 
-                  {mat.keyMetrics && mat.keyMetrics.length > 0 && (
+                  {formatKeyMetricsArr(mat.keyMetrics).length > 0 && (
                     <div className="pl-8 flex items-center space-x-2 flex-wrap gap-1 text-[10px]">
-                      {mat.keyMetrics.map((metric, idx) => (
+                      {formatKeyMetricsArr(mat.keyMetrics).map((metric, idx) => (
                         <span
                           key={idx}
                           className="px-2 py-0.5 bg-slate-100 text-slate-600 font-mono rounded"

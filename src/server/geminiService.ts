@@ -528,6 +528,23 @@ export async function searchTavily(
   }
 }
 
+// Normalize keyMetrics to a comma-joined string. Material/event keyMetrics may be an array
+// (["容量 3.7GW"]), an object ({"rebateAmount": "RM4,000"}), or a raw string depending on the
+// provider; the collector/AI output is not guaranteed to be an array (e.g. Alibaba deepseek
+// emits dicts). Guard every consumer against .join() on a non-array.
+export function formatKeyMetrics(keyMetrics: unknown, fallback = "无"): string {
+  if (Array.isArray(keyMetrics)) {
+    const items = keyMetrics.map((k) => (typeof k === "object" && k !== null ? JSON.stringify(k) : String(k)));
+    return items.length > 0 ? items.join(", ") : fallback;
+  }
+  if (keyMetrics && typeof keyMetrics === "object") {
+    const entries = Object.entries(keyMetrics as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`);
+    return entries.length > 0 ? entries.join(", ") : fallback;
+  }
+  const s = String(keyMetrics ?? "").trim();
+  return s.length > 0 ? s : fallback;
+}
+
 export const REGION_NAMES: Record<Region, string> = {
   NorthAmerica: "北美 (North America)",
   EuropeUK: "欧英 (Europe & UK)",
@@ -698,7 +715,7 @@ export async function auditAndEnrichResearchEvents(
 信源链接: ${evt.sourceUrl || "无"}
 摘要描述: ${evt.summary || "无摘要"}
 详细阐述: ${evt.fullContent || evt.summary || "无"}
-核心量化指标: ${Array.isArray(evt.keyMetrics) ? evt.keyMetrics.join(", ") : (evt.keyMetrics || "无")}
+核心量化指标: ${formatKeyMetrics(evt.keyMetrics)}
 标签: ${Array.isArray(evt.tags) ? evt.tags.join(", ") : (evt.tags || "无")}
 `).join("\n---");
 
@@ -909,14 +926,18 @@ export async function runEventResearchAndDedup(
     ? `【时效性月度窗口 (Past 30 Days: ${fromDateStr} 至 ${toDateStr})】：严格限定检索近 30 天内海外各区域重大新能源产业突破、政策细则落地与商业投资！`
     : `【${currentYear}年度实时时效性硬性过滤 (Strict Window: ${fromDateStr} 至 ${toDateStr})】：基准年份锁定为 ${currentYear} 年！所有事件必须为 ${fromDateStr} 至 ${toDateStr} 时间段内最新颁布、开标、签约或实质并网进展！严禁输出 2024 年及更早的历史旧闻、已过时草案或陈旧数据！`;
 
+  // Broad, open-ended queries: overly specific region/theme qualifiers (e.g. "Saudi UAE",
+  // "PLN", "FERC") made Tavily return too few hits. Keep the year qualifier + the
+  // startDate/endDate window (passed separately to searchTavily) so results stay fresh,
+  // but let the synthesis AI assign regions from whatever real news comes back.
   const searchQueriesWithDates = [
-    `"Middle East renewable energy storage tender Saudi UAE August ${currentYear}"`,
-    `"Europe battery storage BESS grid fee UK Germany August ${currentYear}"`,
-    `"Southeast Asia PLN microgrid solar energy PPA August ${currentYear}"`,
-    `"North America FERC interconnection queue battery storage ${currentYear}"`,
-    `"Latin America Chile LDES energy storage loan August ${currentYear}"`,
-    `"Central Asia Uzbekistan solar storage EPC tender August ${currentYear}"`,
-    `"Africa renewable mining microgrid South Africa August ${currentYear}"`,
+    `renewable energy ${currentYear}`,
+    `solar energy project ${currentYear}`,
+    `battery storage BESS ${currentYear}`,
+    `energy storage project ${currentYear}`,
+    `solar PPA power purchase agreement ${currentYear}`,
+    `microgrid renewable energy ${currentYear}`,
+    `green hydrogen project ${currentYear}`,
   ];
 
   const systemPrompt = `你是新能源（光伏、储能 BESS、智能电网、绿氢、商用车及车队电动化）首席行业情报分析师。执行“海外 7 大区域实时增量事件调研与负向去重”。
@@ -1311,7 +1332,7 @@ export async function generateAIWeeklyArticles(
 出处: ${m.source}
 摘要: ${m.summary}
 详细内容: ${m.fullContent || m.summary}
-核心指标: ${m.keyMetrics?.join(", ") || "无"}
+核心指标: ${formatKeyMetrics(m.keyMetrics)}
 `).join("\n---");
 
   const customStyleGuidance = stylePromptInstruction
@@ -1446,7 +1467,7 @@ function getSimulatedArticles(
       region: m.region,
       category: m.category,
       summary: m.summary,
-      bodyMarkdown: `全球新能源行业洞察：${m.title}\n\n${m.summary}\n\n关键战略与技术亮点：\n1. 行业信源：${m.source}\n2. 涉及区域：${REGION_NAMES[m.region]}\n3. 核心指标：${m.keyMetrics?.join("、") || "重大国际新能源投资"}\n\n行业洞察研判：\n这一标志性事件预示着 ${REGION_NAMES[m.region]} 正在加速推进新型电力系统与储能并网架构升级。\n\n若您需要 ${REGION_NAMES[m.region]} 区域的项目开发、设备选型或商业合作咨询，欢迎随时联系我们的顾问专员：\n\n{{BD_CONSULTATION_SLOT}}\n\nRenewableEnergy EnergyStorage CleanTech NetZero`,
+      bodyMarkdown: `全球新能源行业洞察：${m.title}\n\n${m.summary}\n\n关键战略与技术亮点：\n1. 行业信源：${m.source}\n2. 涉及区域：${REGION_NAMES[m.region]}\n3. 核心指标：${formatKeyMetrics(m.keyMetrics, "重大国际新能源投资")}\n\n行业洞察研判：\n这一标志性事件预示着 ${REGION_NAMES[m.region]} 正在加速推进新型电力系统与储能并网架构升级。\n\n若您需要 ${REGION_NAMES[m.region]} 区域的项目开发、设备选型或商业合作咨询，欢迎随时联系我们的顾问专员：\n\n{{BD_CONSULTATION_SLOT}}\n\nRenewableEnergy EnergyStorage CleanTech NetZero`,
       usedMaterialIds: [m.id],
       status: 'generated' as const,
       stylePreset: 'LinkedInPost' as const,
