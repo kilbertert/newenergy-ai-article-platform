@@ -56,12 +56,30 @@
 IPv6 出口，Node 的 `fetch` 会先试 AAAA 并在 connect 阶段超时且不回落（`curl` 会回落，
 所以只有从 Node 里发起的出站请求会中招）。
 
-## 入口链路（过渡形态）
+## 入口链路（当前状态）
+
+**入口仍在 development host，frpc 也仍指向本机实例**（`~/.config/frp/newenergy.toml`：
+`localIP = "127.0.0.1"`, `localPort = 8580`）：
 
 ```
 newenergy.ranlei.work → Cloudflare → development host nginx:443 → frps:8188
-                      → frpc（localIP = 8.138.202.79, localPort = 18580）→ service host
+                      → frpc（localIP = 127.0.0.1, localPort = 8580）→ development host 实例
 ```
+
+把 frpc 的 `localIP` 改指 service host **走不通**（2026-09-19 实测）：service host 是境内
+阿里云 ECS，其入站 HTTP 会按 `Host` 头做备案检查，`Host` 是未备案域名就直接返回备案拦截页
+（HTTP 403），**不区分端口**。对照实验（全部在 development host 上发起）：
+
+| 请求 | 结果 |
+| --- | --- |
+| `Host: newenergy.ranlei.work` → `8.138.202.79:18580` | `403` 阿里云备案拦截页 |
+| `Host: 8.138.202.79:18580` → 同一端口 | `200` 应用 |
+| `Host: example.com`、`Host: some-other.work` → 同一端口 | `200` 应用 |
+| service host 本机 `127.0.0.1:18580` + `Host: newenergy.ranlei.work` | `200` 应用（拦截发生在机器之外） |
+| 同一 `Host` 发往非阿里云目标（httpbin） | 头部照常送达（排除 development host 侧中间件） |
+
+同一原因也让 `ds408.ranlei.work` 的同类切换失败并已回滚。因此 service host 上的实例只能
+**出站**接入入口（Cloudflare Tunnel / cloudflared），或让入口域名落在已备案域名上；见待办。
 
 ## 跨服务依赖
 
@@ -72,9 +90,14 @@ development host 上（`:8100`），从 service host 不可直连，因此过渡
 
 ## 回滚
 
-1. 把 development host 的 `~/.config/frp/newenergy.toml` 改回 `localIP = "127.0.0.1"`、
-   `localPort = 8580`，`systemctl --user restart newenergy-frp`（旧实例仍在运行）。
-2. 或在 service host 上把 `dist.old` 换回 `dist` 并 `systemctl restart newenergy`。
+入口当前就在 development host 实例上（见上），所以"切换到 service host"这一步尚未发生。
+service host 上的实例是**已验证但未接流量的待切换目标**：`systemctl is-active newenergy`
+为 active，监听 `18580`，`data/` 已在切换演练时从 development host 播种过一次。
+
+要回到纯 development host 形态：确认 development host 实例 active、frpc 指向
+`127.0.0.1:8580`，其余不动。要启用 service host 实例：先按"入口链路"一节解决备案拦截，
+再停 development host 实例 → 重新播种 `data/` → 切入口 → 验证（有状态，需一次短停写窗口）。
+service host 上还有一次部署留下的 `dist.old`。
 
 ## 待办
 
@@ -82,3 +105,8 @@ development host 上（`:8100`），从 service host 不可直连，因此过渡
 - leadgen 的 Basic Auth 凭据曾硬编码在 `server.ts`，且仍在 git 历史里。现已只从
   `LEAD_GEN_AUTH` 读取，**但旧凭据尚未轮换**——需在 leadgen 侧改口令，再更新 env 文件。
 - 本仓库没有 CI：值得加一条最小门禁（lint + build）。
+- **入口切换被备案检查挡住**（见"入口链路"）：终局是 cloudflared（纯出站，不产生带域名的
+  入站 HTTP），或改用已备案域名。决定之前入口保持在 development host，service host 实例
+  接不到流量。
+- development host 的回滚实例仍跑着**改动前**的 `dist`：它自带硬编码凭据，且 `/api/leads`
+  用的是旧写死的口令。凭据轮换后这个回滚点会失去线索功能，届时需要一起处理。
