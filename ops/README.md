@@ -7,8 +7,8 @@
 | 主机 | service host `8.138.202.79` |
 | 系统账号 | `newenergy`（system、nologin、无 sudo、无附加组） |
 | 安装路径 | `/opt/newenergy-ai-article-platform` |
-| 监听 | `0.0.0.0:8580`（**既有例外**：端口写在源码里，见待办） |
-| 防火墙 | ufw 仅放行 `154.9.24.30` 访问 `8580/tcp` |
+| 监听 | `0.0.0.0:18580`（service host 端口池 `15000-19999` 内，由 unit 注入 `PORT`） |
+| 防火墙 | ufw 仅放行 `154.9.24.30` 访问 `18580/tcp` |
 | 运行时 | Node `v24.15.0`（`/usr/local/bin/node`，与 development host 同版本） |
 | 单元 | `ops/newenergy.service` → `/etc/systemd/system/` |
 
@@ -47,12 +47,16 @@
 | `DISABLE_HMR` | `true` |
 | `TAVILY_API_KEY` | 实时检索用（原先明文写在 unit 的 `Environment=` 里，已移出） |
 | `LEAD_GEN_BASE_URL` | leadgen 服务地址；过渡期指向 `https://leadgen.ranlei.work` |
+| `LEAD_GEN_AUTH` | leadgen 的**完整** `Authorization` 头值，如 `Basic <base64(user:pass)>`。原先硬编码在 `server.ts`，已移出；未配置时 `/api/leads*` 返回 503 |
+
+`PORT` 不进这个文件：它由 `ops/newenergy.service` 的 `Environment=PORT=18580` 给出，
+与 `ops/deploy.sh` 的 `PORT` 是同一事实的两处书写。
 
 ## 入口链路（过渡形态）
 
 ```
 newenergy.ranlei.work → Cloudflare → development host nginx:443 → frps:8188
-                      → frpc（localIP = 8.138.202.79, localPort = 8580）→ service host
+                      → frpc（localIP = 8.138.202.79, localPort = 18580）→ service host
 ```
 
 ## 跨服务依赖
@@ -70,10 +74,7 @@ development host 上（`:8100`），从 service host 不可直连，因此过渡
 
 ## 待办
 
-- 本仓库 `main` 落后于线上实际运行的代码：线上 `dist` 由 `fix/frontend-keymetrics-and-state-sync`
-  快照提交 `54accc4` 构建（含 `keyMetrics` 前端改动，`main` 没有）。搬迁按"保持行为不变"
-  用该 ref 部署；分支合并/收敛是另外一件事，未完成前不要把默认 ref 切成 `main`。
 - 迁移完成后把 `LEAD_GEN_BASE_URL` 从公网隧道改为环回地址。
-- `server.ts` 把端口写死成 `const PORT = 8580`，不在 service host 端口池内。
-  应改成 `process.env.PORT`，之后把服务挪进 `15000-19999`；这需要改源码，
-  不能在"仅搬迁"里夹带。
+- leadgen 的 Basic Auth 凭据曾硬编码在 `server.ts`，且仍在 git 历史里。现已只从
+  `LEAD_GEN_AUTH` 读取，**但旧凭据尚未轮换**——需在 leadgen 侧改口令，再更新 env 文件。
+- 本仓库没有 CI：值得加一条最小门禁（lint + build）。
