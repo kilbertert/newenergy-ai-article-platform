@@ -5,7 +5,7 @@ import { store } from "./src/server/store";
 
 async function startServer() {
   const app = express();
-  const PORT = 8580;
+  const PORT = Number(process.env.PORT) || 8580;
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -566,8 +566,8 @@ async function startServer() {
   // LEAD_GEN_BASE_URL overridable via env for cross-server deployment (e.g. a tunnel
   // back to the dev server's 8100); defaults to localhost for single-box setups.
   const LEAD_GEN_BASE = process.env.LEAD_GEN_BASE_URL || "http://127.0.0.1:8100";
-  const LEAD_GEN_AUTH =
-    "Basic " + Buffer.from("beta:VFngHhHIPe71nutiKEnnPBWq").toString("base64");
+  // Full Authorization header value, e.g. "Basic <base64(user:pass)>". Never in source.
+  const LEAD_GEN_AUTH = process.env.LEAD_GEN_AUTH || "";
 
   // Forward request to linkedin-lead-gen, returning its JSON verbatim.
   // Passes through GET query string and, when method is POST, a JSON body.
@@ -578,6 +578,13 @@ async function startServer() {
     method: string = "GET"
   ) {
     try {
+      if (!LEAD_GEN_AUTH) {
+        res.status(503).json({
+          success: false,
+          error: "本服务未配置 LEAD_GEN_AUTH，无法访问 LinkedIn Leads 上游",
+        });
+        return;
+      }
       const query = req.originalUrl.includes("?")
         ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
         : "";

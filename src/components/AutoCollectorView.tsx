@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { Material, NegativeCacheItem, Region, EventCategory, CollectorPromptConfig } from "../types";
 import { REGION_NAMES, CATEGORY_NAMES } from "../server/geminiService";
+import { formatKeyMetricsArr } from "../lib/formatKeyMetrics";
 
 interface AutoCollectorViewProps {
   materials: Material[];
@@ -768,9 +769,9 @@ export const AutoCollectorView: React.FC<AutoCollectorViewProps> = ({
                 </p>
 
                 {/* Key Metrics Pills */}
-                {item.keyMetrics && item.keyMetrics.length > 0 && (
+                {formatKeyMetricsArr(item.keyMetrics).length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    {item.keyMetrics.map((m, idx) => (
+                    {formatKeyMetricsArr(item.keyMetrics).map((m, idx) => (
                       <span
                         key={idx}
                         className="text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200/80"
@@ -931,11 +932,11 @@ export const AutoCollectorView: React.FC<AutoCollectorViewProps> = ({
             </div>
 
             {/* Key Metrics */}
-            {selectedMaterialForDetail.keyMetrics && selectedMaterialForDetail.keyMetrics.length > 0 && (
+            {formatKeyMetricsArr(selectedMaterialForDetail.keyMetrics).length > 0 && (
               <div className="space-y-2">
                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">核心量化指标 (Key Metrics)</h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedMaterialForDetail.keyMetrics.map((m, idx) => (
+                  {formatKeyMetricsArr(selectedMaterialForDetail.keyMetrics).map((m, idx) => (
                     <span
                       key={idx}
                       className="text-xs font-semibold bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded-lg border border-emerald-200"

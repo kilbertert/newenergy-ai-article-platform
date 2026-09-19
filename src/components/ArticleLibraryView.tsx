@@ -51,6 +51,12 @@ export const ArticleLibraryView: React.FC<ArticleLibraryViewProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [tempHours, setTempHours] = useState(dispatchWindowHours);
 
+  // Keep the settings-dialog draft in sync when the persisted window hours change
+  // (e.g. after a save + backend refresh), so it never shows a stale value.
+  useEffect(() => {
+    setTempHours(dispatchWindowHours);
+  }, [dispatchWindowHours]);
+
   // Time remaining helper
   const getTimeRemaining = (scheduledAt?: string) => {
     if (!scheduledAt) return "未知";

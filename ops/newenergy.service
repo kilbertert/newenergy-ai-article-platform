@@ -14,6 +14,8 @@ User=newenergy
 Group=newenergy
 WorkingDirectory=/opt/newenergy-ai-article-platform
 EnvironmentFile=/etc/newenergy-ai-article-platform/env
+# 监听端口；与 ops/deploy.sh 的 PORT 保持一致，改动要两处一起改。
+Environment=PORT=18580
 ExecStart=/usr/local/bin/node dist/server.cjs
 Restart=on-failure
 RestartSec=3
