@@ -56,6 +56,10 @@
 IPv6 出口，Node 的 `fetch` 会先试 AAAA 并在 connect 阶段超时且不回落（`curl` 会回落，
 所以只有从 Node 里发起的出站请求会中招）。
 
+**带空格的值不要写进 unit 的 `Environment=`**：systemd 按空格切分赋值，
+`Environment=LEAD_GEN_AUTH=Basic xxx` 会被截成 `LEAD_GEN_AUTH=Basic`，请求到上游就是 401。
+`LEAD_GEN_AUTH` 正好是这种值——放 `EnvironmentFile`，或写成 `Environment="LEAD_GEN_AUTH=Basic xxx"`。
+
 ## 入口链路（当前状态）
 
 **入口仍在 development host，frpc 也仍指向本机实例**（`~/.config/frp/newenergy.toml`：
@@ -102,11 +106,10 @@ service host 上还有一次部署留下的 `dist.old`。
 ## 待办
 
 - 迁移完成后把 `LEAD_GEN_BASE_URL` 从公网隧道改为环回地址。
-- leadgen 的 Basic Auth 凭据曾硬编码在 `server.ts`，且仍在 git 历史里。现已只从
-  `LEAD_GEN_AUTH` 读取，**但旧凭据尚未轮换**——需在 leadgen 侧改口令，再更新 env 文件。
-- 本仓库没有 CI：值得加一条最小门禁（lint + build）。
-- **入口切换被备案检查挡住**（见"入口链路"）：终局是 cloudflared（纯出站，不产生带域名的
-  入站 HTTP），或改用已备案域名。决定之前入口保持在 development host，service host 实例
-  接不到流量。
-- development host 的回滚实例仍跑着**改动前**的 `dist`：它自带硬编码凭据，且 `/api/leads`
-  用的是旧写死的口令。凭据轮换后这个回滚点会失去线索功能，届时需要一起处理。
+- 本仓库没有 CI：值得加一条最小门禁（lint + build）。已确认 lint（`tsc --noEmit`）与
+  build 在 `main` 上通过。
+- **入口切换已选定 cloudflared**（见"入口链路"）：纯出站，不产生带域名的入站 HTTP。
+  cloudflared 已装到 service host，等 Cloudflare 侧的隧道 token；在此之前入口保持在
+  development host，service host 实例接不到流量。
+- leadgen 的 Basic Auth 凭据仍留在 git 历史里（3 个提交）。2026-09-19 已轮换口令，历史里
+  那份随即失效；`main` 上保留历史提交本身（仓库是 private），不再单独改写历史。
