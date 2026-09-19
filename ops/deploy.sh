@@ -64,10 +64,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 if ! id -u $SERVICE_USER >/dev/null 2>&1; then
-  adduser --system --group --no-create-home --home "$APP" $SERVICE_USER
+  adduser --system --group --no-create-home --home "\$APP" $SERVICE_USER
 fi
-install -d -m 755 -o $SERVICE_USER -g $SERVICE_USER "$APP"
-install -d -m 700 -o $SERVICE_USER -g $SERVICE_USER "$APP/data"
+install -d -m 755 -o $SERVICE_USER -g $SERVICE_USER "\$APP"
+install -d -m 700 -o $SERVICE_USER -g $SERVICE_USER "\$APP/data"
 
 STAGING=\$(mktemp -d)
 trap 'rm -rf "\$STAGING"' EXIT
