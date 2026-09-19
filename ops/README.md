@@ -62,17 +62,19 @@ IPv6 出口，Node 的 `fetch` 会先试 AAAA 并在 connect 阶段超时且不�
 
 ## 入口链路（当前状态）
 
-**入口仍在 development host，frpc 也仍指向本机实例**（`~/.config/frp/newenergy.toml`：
-`localIP = "127.0.0.1"`, `localPort = 8580`）：
+**服务在 service host，入口（Cloudflare + nginx + frps + TLS）仍在 development host。**
+frpc 那一跳把 `Host` 重写成 `localhost`，这是它能通的关键：
 
 ```
 newenergy.ranlei.work → Cloudflare → development host nginx:443 → frps:8188
-                      → frpc（localIP = 127.0.0.1, localPort = 8580）→ development host 实例
+                      → frpc（localIP = 8.138.202.79, localPort = 18580,
+                              hostHeaderRewrite = "localhost"）→ service host
 ```
 
-把 frpc 的 `localIP` 改指 service host **走不通**（2026-09-19 实测）：service host 是境内
-阿里云 ECS，其入站 HTTP 会按 `Host` 头做备案检查，`Host` 是未备案域名就直接返回备案拦截页
-（HTTP 403），**不区分端口**。对照实验（全部在 development host 上发起）：
+### 为什么需要 `hostHeaderRewrite`
+
+service host 是境内阿里云 ECS，其入站 HTTP 会按 `Host` 头做备案检查：`Host` 是未备案域名
+就直接返回备案拦截页（HTTP 403），**不区分端口**。对照实验（全部在 development host 上发起）：
 
 | 请求 | 结果 |
 | --- | --- |
@@ -81,9 +83,18 @@ newenergy.ranlei.work → Cloudflare → development host nginx:443 → frps:818
 | `Host: example.com`、`Host: some-other.work` → 同一端口 | `200` 应用 |
 | service host 本机 `127.0.0.1:18580` + `Host: newenergy.ranlei.work` | `200` 应用（拦截发生在机器之外） |
 | 同一 `Host` 发往非阿里云目标（httpbin） | 头部照常送达（排除 development host 侧中间件） |
+| **同上，但 frpc 加 `hostHeaderRewrite = "localhost"`** | **`200` 应用 —— 这就是解法** |
 
-同一原因也让 `ds408.ranlei.work` 的同类切换失败并已回滚。因此 service host 上的实例只能
-**出站**接入入口（Cloudflare Tunnel / cloudflared），或让入口域名落在已备案域名上；见待办。
+应用不读 `Host` 头（源码与构建产物都确认过），所以重写它没有副作用。
+
+**代价与风险**：这绕开的是**入站检查**，内容仍托管在大陆，备案义务不因此消失——这是运维者
+的合规判断，不是技术结论。若阿里云改变检查方式，这一跳会再次失效；届时可退回 IP 直连
+（`http://8.138.202.79:18580`，IP 形式的 `Host` 实测不被拦）或走备案。同一改动也已应用到
+`ds408.toml`。
+
+Cloudflare Tunnel（cloudflared）在这台 ECS 上**不可用**：隧道边缘 `198.41.x.x:7844`
+基本连不通（2026-09-19 实测 120 s 内 0 次成功、11 次失败；TCP 能连上但 TLS 数据不回流）。
+二进制与 unit 留在 service host 上，已 `disable --now`。
 
 ## 跨服务依赖
 
@@ -94,13 +105,13 @@ development host 上（`:8100`），从 service host 不可直连，因此过渡
 
 ## 回滚
 
-入口当前就在 development host 实例上（见上），所以"切换到 service host"这一步尚未发生。
-service host 上的实例是**已验证但未接流量的待切换目标**：`systemctl is-active newenergy`
-为 active，监听 `18580`，`data/` 已在切换演练时从 development host 播种过一次。
+1. `~/.config/frp/newenergy.toml` 改回 `localIP = "127.0.0.1"`、`localPort = 8580`
+   并删掉 `hostHeaderRewrite`，`systemctl --user restart newenergy-frp`。
+2. `systemctl --user start newenergy`（development host 实例仍在，停用状态即回滚点；
+   它的 `dist` 是 `main` 的构建，`data/` 保持在切换那一刻的内容）。
 
-要回到纯 development host 形态：确认 development host 实例 active、frpc 指向
-`127.0.0.1:8580`，其余不动。要启用 service host 实例：先按"入口链路"一节解决备案拦截，
-再停 development host 实例 → 重新播种 `data/` → 切入口 → 验证（有状态，需一次短停写窗口）。
+注意第 2 步之后 development host 上的 `data/` 会从切换时刻继续，而 service host 上的那份
+在此期间已被继续写入——两边分叉，再切回去需要重新播种（有状态，需一次短停写窗口）。
 service host 上还有一次部署留下的 `dist.old`。
 
 ## 待办
@@ -108,8 +119,7 @@ service host 上还有一次部署留下的 `dist.old`。
 - 迁移完成后把 `LEAD_GEN_BASE_URL` 从公网隧道改为环回地址。
 - 本仓库没有 CI：值得加一条最小门禁（lint + build）。已确认 lint（`tsc --noEmit`）与
   build 在 `main` 上通过。
-- **入口切换已选定 cloudflared**（见"入口链路"）：纯出站，不产生带域名的入站 HTTP。
-  cloudflared 已装到 service host，等 Cloudflare 侧的隧道 token；在此之前入口保持在
-  development host，service host 实例接不到流量。
+- **入口仍留在 development host**：服务已经搬走，但 nginx/frps/TLS 这套入口还在原机。
+  要把它也搬走，需要已备案域名（或将入口改成 IP 直连），见"入口链路"一节。
 - leadgen 的 Basic Auth 凭据仍留在 git 历史里（3 个提交）。2026-09-19 已轮换口令，历史里
   那份随即失效；`main` 上保留历史提交本身（仓库是 private），不再单独改写历史。
