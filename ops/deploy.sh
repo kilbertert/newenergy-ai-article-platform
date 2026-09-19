@@ -11,7 +11,10 @@ HOST=root@8.138.202.79
 REF=""
 SKIP_BUILD=0
 DEV_HOST_IP=154.9.24.30                       # 只放行 development host 访问服务端口
-PORT=18580                                    # service host 端口池 15000-19999
+# 应用把端口写死在源码里（server.ts: const PORT = 8580），当前不是环境变量。
+# 搬迁以"行为不变"为先，故沿用 8580，并作为 service host 上的既有例外登记；
+# 等能把端口环境变量化时再挪进服务机端口池 15000-19999。
+PORT=8580
 APP_ROOT=/opt/newenergy-ai-article-platform
 ENV_FILE=/etc/newenergy-ai-article-platform/env
 SERVICE_USER=newenergy
