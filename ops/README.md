@@ -52,6 +52,10 @@
 `PORT` 不进这个文件：它由 `ops/newenergy.service` 的 `Environment=PORT=18580` 给出，
 与 `ops/deploy.sh` 的 `PORT` 是同一事实的两处书写。
 
+同理，`NODE_OPTIONS=--dns-result-order=ipv4first` 也写在 unit 里：service host 没有
+IPv6 出口，Node 的 `fetch` 会先试 AAAA 并在 connect 阶段超时且不回落（`curl` 会回落，
+所以只有从 Node 里发起的出站请求会中招）。
+
 ## 入口链路（过渡形态）
 
 ```
