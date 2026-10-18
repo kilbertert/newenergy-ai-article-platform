@@ -657,8 +657,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Pipeline System Engine server running on http://0.0.0.0:${PORT}`);
+  // Bind to loopback by default. The service is reached through a reverse
+  // proxy / tunnel on the same host, so a wildcard bind only adds exposure:
+  // on a service host a non-loopback listener is reachable by anything that
+  // can route to the box, independent of the application's own auth.
+  // Set HOST=0.0.0.0 only when a deliberate decision requires it.
+  const HOST = process.env.HOST || "127.0.0.1";
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Pipeline System Engine server running on http://${HOST}:${PORT}`);
   });
 }
 
